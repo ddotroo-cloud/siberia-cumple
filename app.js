@@ -1,0 +1,11 @@
+const WHATSAPP='529997675432';
+const EVENT_AT=new Date('2026-09-05T16:00:00-06:00');
+const RSVP_DEADLINE=new Date('2026-09-03T07:00:00-06:00');
+function fmt(n){return String(Math.max(0,n)).padStart(2,'0')}
+function renderCountdown(el,target){if(!el)return;const tick=()=>{const d=Math.max(0,target-Date.now());const days=Math.floor(d/86400000),hours=Math.floor(d%86400000/3600000),mins=Math.floor(d%3600000/60000),secs=Math.floor(d%60000/1000);el.innerHTML=[['DÍAS',days],['HORAS',hours],['MINUTOS',mins],['SEGUNDOS',secs]].map(([l,v])=>`<div class="unit"><b>${fmt(v)}</b><span>${l}</span></div>`).join('')};tick();setInterval(tick,1000)}
+renderCountdown(document.getElementById('eventCountdown'),EVENT_AT);
+renderCountdown(document.getElementById('rsvpCountdown'),RSVP_DEADLINE);
+function wa(text){return `https://wa.me/${WHATSAPP}?text=${encodeURIComponent(text)}`}
+const rsvp=document.getElementById('rsvpForm');
+if(rsvp){let people=2;const pet=document.getElementById('pet'),qty=document.getElementById('qty'),summary=document.getElementById('summary'),send=document.getElementById('sendRsvp'),status=document.getElementById('rsvpStatus');function sync(){qty.textContent=`${people} ${people===1?'persona':'personas'}`;const msg=`Hola ❤️ Confirmo mi asistencia al cumpleaños de Siberia. Seremos ${people} ${people===1?'persona':'personas'} y ${pet.checked?'sí llevaré a mi peludito 🐾':'no llevaré peludito'}.`;summary.textContent=msg;send.href=wa(msg)}document.getElementById('minus').onclick=()=>{people=Math.max(1,people-1);sync()};document.getElementById('plus').onclick=()=>{people=Math.min(20,people+1);sync()};pet.onchange=sync;function gate(){const closed=Date.now()>=RSVP_DEADLINE;if(closed){send.removeAttribute('href');send.style.pointerEvents='none';send.style.opacity='.5';status.textContent='Las confirmaciones ya cerraron.';status.className='status-stop'}else{status.textContent='Confirmaciones abiertas hasta el jueves 3 de septiembre a las 7:00 a. m.';status.className='status-ok'}}sync();gate();setInterval(gate,30000)}
+window.SIBERIA={wa};
