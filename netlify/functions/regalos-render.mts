@@ -22,7 +22,6 @@ export default async () => {
   html = html.replace('<a href="#regalos">Sucursales</a>', '');
   html = html.replace('<small>Husky hembra café<br>de ojos azules</small>', '');
 
-  // El usuario pidió retirar por completo esta frase de cierre.
   html = html.replace(
     /<div class="rule">En Siberia nos enfocamos en productos naturales, seguros y de calidad[\s\S]*?<\/div>/i,
     ""
@@ -42,8 +41,6 @@ export default async () => {
     .map-link{display:block;text-decoration:none;color:inherit;transition:.18s ease}
     .map-link:hover,.map-link:focus-visible{border-color:#ec0b67;box-shadow:0 8px 22px #ec0b6722;transform:translateY(-1px);outline:none}
     .map-hint{display:block;margin-top:7px;color:#ec0b67;font-weight:800;font-size:12px}
-
-    /* Paleta tomada de la invitación aprobada: rosa intenso, crema, negro y blanco. */
     :root{--pink:#ec0b67;--pink2:#f45b91;--ink:#171112;--cream:#fff7f3;--line:#f1b6c9;--soft:#fff1f5}
     body{background:linear-gradient(180deg,#fff7f3 0,#ffeef3 330px,#fffaf7 760px);color:#171112}
     .site-head{background:rgba(255,247,243,.96);border-bottom-color:#f2bed0}
@@ -58,10 +55,8 @@ export default async () => {
     .like,.wellbeing,.modal{background:#fff8f5;border-color:#f1c2d0}
     .like-content h3{color:#ec0b67}
     .footer{background:#171112;color:#fff}
-    .dogmark{background:#ffe4ed;border-color:#ec0b67;color:#ec0b67;overflow:hidden}
-    .dogmark img{width:100%;height:100%;object-fit:cover;display:block}
-    .sibe-face{overflow:hidden;background:#ffe4ed;border-color:#ec0b67}
-    .sibe-face img{width:100%;height:100%;object-fit:cover;display:block}
+    .dogmark,.sibe-face{position:relative;overflow:hidden;background:#ffe4ed;border-color:#ec0b67;color:#ec0b67}
+    .dogmark img,.sibe-face img{position:absolute;width:340%;height:auto;max-width:none;left:0;top:0;transform:translate(-68%,-22%);object-fit:unset;display:block}
     .rules{grid-template-columns:repeat(2,minmax(0,1fr))!important;max-width:780px;margin:0 auto}
     .rule:last-child{border-right:0;text-align:center}
     @media(max-width:700px){.rules{grid-template-columns:1fr!important}}
