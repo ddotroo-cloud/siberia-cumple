@@ -1,1 +1,2 @@
 Trigger Netlify deploy from GitHub connection.
+Final sync: invitación exacta + mesa corregida.
