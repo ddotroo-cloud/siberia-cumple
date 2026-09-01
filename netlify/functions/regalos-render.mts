@@ -7,20 +7,15 @@ export default async () => {
   if (!res.ok) return new Response("No se pudo cargar la mesa de regalos", { status: 502 });
   let html = await res.text();
 
-  // Navegación solicitada: volver a la invitación y sin botón independiente de Sucursales.
   html = html.replace('<a href="index.html">Inicio</a>', '<a href="index.html">← Regresar a la invitación</a>');
   html = html.replace('<a href="#regalos">Sucursales</a>', '');
-
-  // Quitar la descripción del husky en la sección inferior.
   html = html.replace('<small>Husky hembra café<br>de ojos azules</small>', '');
 
-  // Hacer todas las direcciones clicables y abrir Google Maps.
   html = html.replace(
     "document.getElementById('addresses').innerHTML=s.addresses.map(a=>`<div class=\"address\"><b>${a[0]}</b>${a[1]}</div>`).join('');",
     "document.getElementById('addresses').innerHTML=s.addresses.map(a=>{const q=encodeURIComponent(a[1]+' Mérida Yucatán');return `<a class=\"address map-link\" href=\"https://www.google.com/maps/search/?api=1&query=${q}\" target=\"_blank\" rel=\"noopener\"><b>${a[0]}</b>${a[1]}<span class=\"map-hint\">📍 Abrir en Google Maps</span></a>`}).join('');"
   );
 
-  // Mantener la paleta de la invitación original (oscuro, dorado, rosa y crema).
   html = html.replace('</style>', `
     .map-link{display:block;text-decoration:none;color:inherit;transition:.18s ease}
     .map-link:hover,.map-link:focus-visible{border-color:#d5a84c;box-shadow:0 8px 22px #0002;transform:translateY(-1px);outline:none}
@@ -45,4 +40,4 @@ export default async () => {
   });
 };
 
-export const config: Config = { path: "/mesa-render" };
+export const config: Config = { path: "/regalos.html" };
