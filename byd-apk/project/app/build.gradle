@@ -1,0 +1,19 @@
+plugins { id 'com.android.application' }
+
+android {
+    namespace 'com.byd.passwordauto'
+    compileSdk 36
+
+    defaultConfig {
+        applicationId 'com.byd.passwordauto'
+        minSdk 26
+        targetSdk 36
+        versionCode 2
+        versionName '1.1'
+    }
+
+    compileOptions {
+        sourceCompatibility JavaVersion.VERSION_17
+        targetCompatibility JavaVersion.VERSION_17
+    }
+}

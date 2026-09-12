@@ -1,0 +1,4 @@
+<resources>
+  <string name="app_name">BYD Password Auto</string>
+  <string name="accessibility_description">Introduce automáticamente la contraseña de operación cuando aparece la pantalla de contraseña de BYD AUTO.</string>
+</resources>
