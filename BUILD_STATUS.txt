@@ -1,0 +1,5 @@
+BYD Password Auto v1.2
+- Mejora de detección de pantalla de contraseña.
+- Detección por texto, campo password y teclado numérico accesible.
+- Método alternativo por geometría de los nodos.
+- Diagnóstico visible en la pantalla principal de la app.
