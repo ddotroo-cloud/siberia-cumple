@@ -6,162 +6,279 @@ import android.graphics.Path;
 import android.graphics.Rect;
 import android.os.Handler;
 import android.os.Looper;
-import android.util.DisplayMetrics;
 import android.view.accessibility.AccessibilityEvent;
 import android.view.accessibility.AccessibilityNodeInfo;
+
 import java.text.Normalizer;
+import java.util.HashMap;
 import java.util.Locale;
+import java.util.Map;
 
 public class BydPasswordService extends AccessibilityService {
-    private static final String BYD_PACKAGE = "com.byd.bydautolink";
-    private static final long DELAY = 120L;
     private final Handler handler = new Handler(Looper.getMainLooper());
     private boolean filling;
-    private boolean screenActive;
+    private long lastFillAt;
+    private String lastEventText = "";
+
+    @Override protected void onServiceConnected() {
+        super.onServiceConnected();
+        getSharedPreferences("cfg", MODE_PRIVATE).edit()
+                .putLong("service_connected_at", System.currentTimeMillis())
+                .putString("last_diag", "Servicio conectado. Esperando eventos.")
+                .apply();
+    }
 
     @Override public void onAccessibilityEvent(AccessibilityEvent event) {
         if (event == null || event.getPackageName() == null) return;
+        String pkg = event.getPackageName().toString();
+        if (getPackageName().equals(pkg)) return;
+
+        long now = System.currentTimeMillis();
+        getSharedPreferences("cfg", MODE_PRIVATE).edit()
+                .putString("last_seen_package", pkg)
+                .putLong("last_event_at", now).apply();
+
+        long learnUntil = getSharedPreferences("cfg", MODE_PRIVATE).getLong("learn_until", 0L);
+        if (now < learnUntil && learnable(pkg)) {
+            getSharedPreferences("cfg", MODE_PRIVATE).edit()
+                    .putString("target_package", pkg)
+                    .putLong("learn_until", 0L)
+                    .putString("last_diag", "App BYD aprendida: " + pkg + ". Abre ahora la pantalla de contraseña.")
+                    .apply();
+            return;
+        }
+
+        if (!isTarget(pkg)) return;
         if (!getSharedPreferences("cfg", MODE_PRIVATE).getBoolean("automation_enabled", false)) {
-            cancelFill(); screenActive = false; return;
+            saveDiag("BYD detectado (" + pkg + "), pero automatización está desactivada.");
+            return;
         }
-        if (!BYD_PACKAGE.contentEquals(event.getPackageName())) return;
+
+        lastEventText = eventText(event);
+        handler.removeCallbacksAndMessages(null);
+        handler.postDelayed(this::scan, 140L);
+    }
+
+    private boolean learnable(String pkg) {
+        String p = pkg.toLowerCase(Locale.ROOT);
+        return !p.equals("android") && !p.contains("systemui") && !p.contains("launcher")
+                && !p.startsWith("com.sec.android") && !p.startsWith("com.samsung.android");
+    }
+
+    private boolean isTarget(String pkg) {
+        String learned = getSharedPreferences("cfg", MODE_PRIVATE).getString("target_package", "");
+        if (!learned.isEmpty()) return learned.equals(pkg);
+        return pkg.toLowerCase(Locale.ROOT).contains("byd");
+    }
+
+    private void scan() {
         AccessibilityNodeInfo root = getRootInActiveWindow();
-        if (root == null) return;
-        boolean present = containsPrompt(root);
+        if (root == null) {
+            saveDiag("BYD detectado, pero Android no entrega la raíz de la ventana.");
+            return;
+        }
+        boolean prompt = containsPrompt(root) || matchesPrompt(lastEventText);
+        boolean password = containsPassword(root);
+        Map<Character, Rect> digits = new HashMap<>();
+        collectDigits(root, digits);
+        String cls = root.getClassName() == null ? "?" : root.getClassName().toString();
         root.recycle();
-        if (!present) { screenActive = false; if (filling) cancelFill(); return; }
-        if (screenActive || filling) return;
-        screenActive = true;
-        String password = new SecureStore(this).getPassword();
-        if (!password.matches("\\d{6}")) return;
+
+        boolean compatible = prompt || (password && digits.size() >= 9) || digits.size() == 10;
+        saveDiag("Ventana=" + cls + " | textoClave=" + yes(prompt) + " | campoPassword=" + yes(password)
+                + " | dígitos visibles=" + digits.size() + "/10 | "
+                + (compatible ? "pantalla compatible" : "pantalla aún no compatible"));
+
+        if (!compatible || filling || System.currentTimeMillis() - lastFillAt < 3500L) return;
+        String pass = new SecureStore(this).getPassword();
+        if (!pass.matches("\\d{6}")) {
+            saveDiag("Pantalla compatible, pero no pude leer una contraseña válida guardada.");
+            return;
+        }
         filling = true;
-        handler.postDelayed(() -> fillDigit(password, 0), 250L);
+        lastFillAt = System.currentTimeMillis();
+        handler.postDelayed(() -> fill(pass, 0), 220L);
     }
 
-    private void fillDigit(String password, int index) {
+    private void fill(String pass, int index) {
         if (!filling) return;
-        if (!getSharedPreferences("cfg", MODE_PRIVATE).getBoolean("automation_enabled", false)) { cancelFill(); return; }
-        if (index >= password.length()) { handler.postDelayed(() -> filling = false, 400L); return; }
+        if (index >= 6) {
+            filling = false;
+            saveDiag("Contraseña enviada: 6/6 pulsaciones.");
+            return;
+        }
         AccessibilityNodeInfo root = getRootInActiveWindow();
-        if (root == null || !containsPrompt(root)) {
-            if (root != null) root.recycle();
-            cancelFill(); screenActive = false; return;
+        if (root == null) {
+            filling = false;
+            saveDiag("Se perdió la ventana en la pulsación " + (index + 1) + "/6.");
+            return;
         }
-        char digit = password.charAt(index);
-        AccessibilityNodeInfo node = findDigitNode(root, digit);
-        root.recycle();
+        char d = pass.charAt(index);
+        AccessibilityNodeInfo node = findDigit(root, d);
         if (node != null) {
-            if (clickNodeOrAncestor(node)) {
-                node.recycle();
-                handler.postDelayed(() -> fillDigit(password, index + 1), DELAY);
+            Rect r = new Rect();
+            node.getBoundsInScreen(r);
+            boolean clicked = clickSelfOrParent(node);
+            node.recycle();
+            root.recycle();
+            if (clicked) {
+                saveDiag("Introduciendo: " + (index + 1) + "/6 por nodo accesible.");
+                handler.postDelayed(() -> fill(pass, index + 1), 170L);
                 return;
             }
-            Rect bounds = new Rect();
-            node.getBoundsInScreen(bounds);
-            node.recycle();
-            if (!bounds.isEmpty()) {
-                tap(bounds.centerX(), bounds.centerY(), () -> handler.postDelayed(() -> fillDigit(password, index + 1), DELAY));
+            if (!r.isEmpty()) {
+                saveDiag("Introduciendo: " + (index + 1) + "/6 por posición del nodo.");
+                tap(r.centerX(), r.centerY(), () -> handler.postDelayed(() -> fill(pass, index + 1), 170L));
                 return;
             }
         }
-        tapFallback(digit, () -> handler.postDelayed(() -> fillDigit(password, index + 1), DELAY));
+
+        Map<Character, Rect> digits = new HashMap<>();
+        collectDigits(root, digits);
+        root.recycle();
+        Rect r = digits.get(d);
+        if (r != null && !r.isEmpty()) {
+            saveDiag("Introduciendo: " + (index + 1) + "/6 por geometría accesible.");
+            tap(r.centerX(), r.centerY(), () -> handler.postDelayed(() -> fill(pass, index + 1), 170L));
+        } else {
+            filling = false;
+            saveDiag("Detecté la pantalla, pero Android no expone el botón " + d + ".");
+        }
     }
 
-    private boolean containsPrompt(AccessibilityNodeInfo node) {
-        if (node == null) return false;
-        if (matchesPrompt(node.getText()) || matchesPrompt(node.getContentDescription())) return true;
-        for (int i = 0; i < node.getChildCount(); i++) {
-            AccessibilityNodeInfo child = node.getChild(i);
-            if (child == null) continue;
-            boolean found = containsPrompt(child);
-            child.recycle();
-            if (found) return true;
+    private boolean containsPrompt(AccessibilityNodeInfo n) {
+        if (n == null) return false;
+        if (matchesPrompt(join(n.getText(), n.getContentDescription(), n.getHintText()))) return true;
+        for (int i = 0; i < n.getChildCount(); i++) {
+            AccessibilityNodeInfo c = n.getChild(i);
+            if (c == null) continue;
+            boolean ok = containsPrompt(c);
+            c.recycle();
+            if (ok) return true;
         }
         return false;
     }
 
-    private boolean matchesPrompt(CharSequence value) {
-        if (value == null) return false;
-        String s = normalize(value.toString());
-        return s.contains("introduzca contrasena de operacion") || (s.contains("contrasena") && s.contains("operacion"));
+    private boolean containsPassword(AccessibilityNodeInfo n) {
+        if (n == null) return false;
+        if (n.isPassword()) return true;
+        String t = norm(join(n.getText(), n.getContentDescription(), n.getHintText()));
+        if (t.contains("contrasena") || t.contains("password") || t.contains("operacion")) return true;
+        for (int i = 0; i < n.getChildCount(); i++) {
+            AccessibilityNodeInfo c = n.getChild(i);
+            if (c == null) continue;
+            boolean ok = containsPassword(c);
+            c.recycle();
+            if (ok) return true;
+        }
+        return false;
     }
 
-    private String normalize(String s) {
-        return Normalizer.normalize(s, Normalizer.Form.NFD).replaceAll("\\p{M}+", "").toLowerCase(Locale.ROOT).trim();
-    }
-
-    private AccessibilityNodeInfo findDigitNode(AccessibilityNodeInfo node, char digit) {
-        if (node == null) return null;
-        if (matchesDigit(node.getText(), digit) || matchesDescription(node, digit)) return AccessibilityNodeInfo.obtain(node);
-        for (int i = 0; i < node.getChildCount(); i++) {
-            AccessibilityNodeInfo child = node.getChild(i);
-            if (child == null) continue;
-            AccessibilityNodeInfo found = findDigitNode(child, digit);
-            child.recycle();
+    private AccessibilityNodeInfo findDigit(AccessibilityNodeInfo n, char digit) {
+        if (n == null) return null;
+        if (isDigitNode(n, digit)) return AccessibilityNodeInfo.obtain(n);
+        for (int i = 0; i < n.getChildCount(); i++) {
+            AccessibilityNodeInfo c = n.getChild(i);
+            if (c == null) continue;
+            AccessibilityNodeInfo found = findDigit(c, digit);
+            c.recycle();
             if (found != null) return found;
         }
         return null;
     }
 
-    private boolean matchesDigit(CharSequence value, char digit) {
-        if (value == null) return false;
-        String s = normalize(value.toString());
-        return s.length() == 1 && s.charAt(0) == digit;
+    private void collectDigits(AccessibilityNodeInfo n, Map<Character, Rect> out) {
+        if (n == null) return;
+        String s = digitText(n);
+        if (s.length() == 1 && Character.isDigit(s.charAt(0))) {
+            Rect r = new Rect();
+            n.getBoundsInScreen(r);
+            if (!r.isEmpty()) out.putIfAbsent(s.charAt(0), r);
+        }
+        for (int i = 0; i < n.getChildCount(); i++) {
+            AccessibilityNodeInfo c = n.getChild(i);
+            if (c == null) continue;
+            collectDigits(c, out);
+            c.recycle();
+        }
     }
 
-    private boolean matchesDescription(AccessibilityNodeInfo node, char digit) {
-        CharSequence value = node.getContentDescription();
-        if (value == null) return false;
-        String s = normalize(value.toString());
-        if (s.length() == 1 && s.charAt(0) == digit) return true;
-        String d = String.valueOf(digit);
-        boolean token = s.matches(".*(^|\\D)" + d + "(\\D|$).*");
-        boolean key = s.contains("tecla") || s.contains("boton") || s.contains("button") || s.contains("key") || s.contains("numero");
-        return token && (node.isClickable() || key);
+    private boolean isDigitNode(AccessibilityNodeInfo n, char d) {
+        String s = digitText(n);
+        return s.length() == 1 && s.charAt(0) == d;
     }
 
-    private boolean clickNodeOrAncestor(AccessibilityNodeInfo start) {
-        AccessibilityNodeInfo current = AccessibilityNodeInfo.obtain(start);
-        try {
-            for (int depth = 0; depth < 5 && current != null; depth++) {
-                if (current.isClickable() && current.performAction(AccessibilityNodeInfo.ACTION_CLICK)) return true;
-                AccessibilityNodeInfo parent = current.getParent();
-                current.recycle();
-                current = parent;
+    private String digitText(AccessibilityNodeInfo n) {
+        String t = n.getText() == null ? "" : n.getText().toString().trim();
+        if (t.length() == 1 && Character.isDigit(t.charAt(0))) return t;
+        String c = n.getContentDescription() == null ? "" : n.getContentDescription().toString().trim();
+        return c.length() == 1 && Character.isDigit(c.charAt(0)) ? c : "";
+    }
+
+    private boolean clickSelfOrParent(AccessibilityNodeInfo node) {
+        AccessibilityNodeInfo cur = AccessibilityNodeInfo.obtain(node);
+        for (int i = 0; i < 5 && cur != null; i++) {
+            if (cur.isClickable() && cur.performAction(AccessibilityNodeInfo.ACTION_CLICK)) {
+                cur.recycle();
+                return true;
             }
-        } finally { if (current != null) current.recycle(); }
+            AccessibilityNodeInfo parent = cur.getParent();
+            cur.recycle();
+            cur = parent;
+        }
+        if (cur != null) cur.recycle();
         return false;
     }
 
-    private void tapFallback(char digit, Runnable done) {
-        AccessibilityNodeInfo root = getRootInActiveWindow();
-        if (root == null || !containsPrompt(root)) {
-            if (root != null) root.recycle();
-            cancelFill(); screenActive = false; return;
-        }
-        root.recycle();
-        DisplayMetrics dm = getResources().getDisplayMetrics();
-        float w = dm.widthPixels, h = dm.heightPixels;
-        float[] xs = {0.28f, 0.50f, 0.72f};
-        float[] ys = {0.57f, 0.67f, 0.77f};
-        int n = digit - '0';
-        float x, y;
-        if (n == 0) { x = 0.50f * w; y = 0.87f * h; }
-        else { int k = n - 1; x = xs[k % 3] * w; y = ys[k / 3] * h; }
-        tap(x, y, done);
-    }
-
     private void tap(float x, float y, Runnable done) {
-        Path path = new Path(); path.moveTo(x, y);
-        GestureDescription gesture = new GestureDescription.Builder()
-                .addStroke(new GestureDescription.StrokeDescription(path, 0, 55)).build();
-        dispatchGesture(gesture, new GestureResultCallback() {
-            @Override public void onCompleted(GestureDescription g) { if (done != null) done.run(); }
-            @Override public void onCancelled(GestureDescription g) { cancelFill(); }
+        Path p = new Path();
+        p.moveTo(x, y);
+        GestureDescription g = new GestureDescription.Builder()
+                .addStroke(new GestureDescription.StrokeDescription(p, 0, 70)).build();
+        dispatchGesture(g, new GestureResultCallback() {
+            @Override public void onCompleted(GestureDescription gestureDescription) {
+                if (done != null) done.run();
+            }
+            @Override public void onCancelled(GestureDescription gestureDescription) {
+                filling = false;
+                saveDiag("Android canceló el gesto de Accesibilidad.");
+            }
         }, null);
     }
 
-    private void cancelFill() { handler.removeCallbacksAndMessages(null); filling = false; }
-    @Override public void onInterrupt() { cancelFill(); screenActive = false; }
-    @Override public void onDestroy() { cancelFill(); super.onDestroy(); }
+    private boolean matchesPrompt(CharSequence text) {
+        String t = norm(text == null ? "" : text.toString());
+        return t.contains("introduzca contrasena de operacion")
+                || (t.contains("contrasena") && t.contains("operacion"));
+    }
+
+    private String eventText(AccessibilityEvent e) {
+        StringBuilder b = new StringBuilder();
+        if (e.getContentDescription() != null) b.append(e.getContentDescription()).append(' ');
+        for (CharSequence s : e.getText()) if (s != null) b.append(s).append(' ');
+        return b.toString();
+    }
+
+    private String join(CharSequence... xs) {
+        StringBuilder b = new StringBuilder();
+        for (CharSequence x : xs) if (x != null) b.append(x).append(' ');
+        return b.toString();
+    }
+
+    private String norm(String s) {
+        String x = Normalizer.normalize(s, Normalizer.Form.NFD).replaceAll("\\p{M}", "");
+        return x.toLowerCase(Locale.ROOT).replaceAll("\\s+", " ").trim();
+    }
+
+    private String yes(boolean b) { return b ? "sí" : "no"; }
+
+    private void saveDiag(String s) {
+        getSharedPreferences("cfg", MODE_PRIVATE).edit().putString("last_diag", s).apply();
+    }
+
+    @Override public void onInterrupt() {
+        filling = false;
+        handler.removeCallbacksAndMessages(null);
+        saveDiag("Servicio interrumpido por Android.");
+    }
 }
