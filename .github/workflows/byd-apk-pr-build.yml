@@ -1,0 +1,31 @@
+name: Build BYD APK v1.3
+
+on:
+  pull_request:
+    branches: [ byd-ci-base ]
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: byd-apk-build
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+      - uses: android-actions/setup-android@v3
+      - name: Install Android SDK
+        run: sdkmanager "platforms;android-36" "build-tools;35.0.0"
+      - uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: '8.13'
+      - name: Build APK
+        run: gradle :app:assembleDebug --stacktrace
+      - name: Verify APK
+        run: test -f app/build/outputs/apk/debug/app-debug.apk && unzip -t app/build/outputs/apk/debug/app-debug.apk
+      - uses: actions/upload-artifact@v4
+        with:
+          name: BYDPasswordAuto-v1.3-apk
+          path: app/build/outputs/apk/debug/app-debug.apk
